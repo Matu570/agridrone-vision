@@ -1,0 +1,19 @@
+# Entorno virtual
+venv/
+env/
+
+# Archivos compilados de Python
+__pycache__/
+*.pyc
+
+# Variables de entorno y contraseñas
+.env
+
+# Archivos del sistema operativo (Mac)
+.DS_Store
+
+# Imágenes subidas y procesadas
+static/uploads/*
+static/processed/*
+!static/uploads/.gitkeep
+!static/processed/.gitkeep

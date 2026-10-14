@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgriDrone Vision</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              field: {
+                50: "#f3f8f1",
+                100: "#e3f0dc",
+                500: "#4a8c3f",
+                700: "#2f5d2a",
+                900: "#163318",
+              },
+            },
+          },
+        },
+      };
+    </script>
+  </head>
+  <body class="bg-field-50 text-slate-800 min-h-screen">
+    <header class="bg-field-900 text-white">
+      <div class="max-w-6xl mx-auto px-4 py-6 flex items-center justify-between">
+        <div>
+          <p class="text-sm uppercase tracking-[0.2em] text-field-100">Agricultura de precisión</p>
+          <h1 class="text-2xl md:text-3xl font-semibold">AgriDrone Vision</h1>
+        </div>
+        <p class="hidden md:block text-sm text-field-100">Conteo automático de cultivos desde imágenes cenitales</p>
+      </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 py-8 grid gap-8 lg:grid-cols-2">
+      <section class="bg-white rounded-2xl shadow-sm border border-field-100 p-6">
+        <h2 class="text-xl font-semibold text-field-900 mb-2">Subir imagen aérea</h2>
+        <p class="text-sm text-slate-500 mb-4">
+          Acepta JPG o PNG. El backend detecta áreas verdes, dibuja bounding boxes y guarda el conteo.
+        </p>
+
+        <form id="upload-form" class="space-y-4">
+          <label class="block border-2 border-dashed border-field-500/40 rounded-xl p-6 text-center cursor-pointer hover:bg-field-50">
+            <input id="file-input" type="file" name="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" class="hidden" required />
+            <span id="file-label" class="text-sm text-slate-600">Selecciona o arrastra una imagen JPG/PNG</span>
+          </label>
+          <button
+            type="submit"
+            id="submit-btn"
+            class="w-full bg-field-700 hover:bg-field-900 text-white font-medium py-2.5 rounded-lg transition"
+          >
+            Analizar cultivo
+          </button>
+        </form>
+
+        <p id="status" class="mt-4 text-sm text-slate-500"></p>
+
+        <div id="result" class="hidden mt-6">
+          <div class="flex items-end justify-between mb-3">
+            <h3 class="font-semibold text-field-900">Imagen procesada</h3>
+            <p id="count-badge" class="text-sm bg-field-100 text-field-700 px-3 py-1 rounded-full"></p>
+          </div>
+          <img id="processed-image" alt="Imagen procesada con bounding boxes" class="w-full rounded-xl border border-field-100 object-cover" />
+        </div>
+      </section>
+
+      <section class="bg-white rounded-2xl shadow-sm border border-field-100 p-6">
+        <h2 class="text-xl font-semibold text-field-900 mb-4">Historial de escaneos</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm text-left">
+            <thead class="text-slate-500 border-b">
+              <tr>
+                <th class="py-2 pr-3">ID</th>
+                <th class="py-2 pr-3">Archivo</th>
+                <th class="py-2 pr-3">Fecha / hora</th>
+                <th class="py-2">Conteo</th>
+              </tr>
+            </thead>
+            <tbody id="scans-body">
+              <tr>
+                <td colspan="4" class="py-6 text-center text-slate-400">Cargando historial...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const form = document.getElementById("upload-form");
+      const fileInput = document.getElementById("file-input");
+      const fileLabel = document.getElementById("file-label");
+      const statusEl = document.getElementById("status");
+      const submitBtn = document.getElementById("submit-btn");
+      const resultEl = document.getElementById("result");
+      const processedImage = document.getElementById("processed-image");
+      const countBadge = document.getElementById("count-badge");
+      const scansBody = document.getElementById("scans-body");
+
+      fileInput.addEventListener("change", () => {
+        fileLabel.textContent = fileInput.files[0]
+          ? fileInput.files[0].name
+          : "Selecciona o arrastra una imagen JPG/PNG";
+      });
+
+      function formatDate(isoString) {
+        const date = new Date(isoString);
+        if (Number.isNaN(date.getTime())) return isoString;
+        return date.toLocaleString("es-AR");
+      }
+
+      async function loadScans() {
+        try {
+          const response = await fetch("/api/scans");
+          if (!response.ok) throw new Error("No se pudo cargar el historial");
+          const scans = await response.json();
+          if (!scans.length) {
+            scansBody.innerHTML =
+              '<tr><td colspan="4" class="py-6 text-center text-slate-400">Todavía no hay escaneos.</td></tr>';
+            return;
+          }
+          scansBody.innerHTML = scans
+            .map(
+              (scan) => `
+              <tr class="border-b last:border-0 hover:bg-field-50 cursor-pointer" data-url="${scan.processed_url}" data-count="${scan.total_count}">
+                <td class="py-3 pr-3">${scan.id}</td>
+                <td class="py-3 pr-3 truncate max-w-[160px]">${scan.filename}</td>
+                <td class="py-3 pr-3">${formatDate(scan.created_at)}</td>
+                <td class="py-3 font-semibold text-field-700">${scan.total_count}</td>
+              </tr>`
+            )
+            .join("");
+
+          scansBody.querySelectorAll("tr[data-url]").forEach((row) => {
+            row.addEventListener("click", () => {
+              showResult(row.dataset.url, row.dataset.count);
+            });
+          });
+        } catch (error) {
+          scansBody.innerHTML =
+            '<tr><td colspan="4" class="py-6 text-center text-red-500">Error al obtener el historial.</td></tr>';
+        }
+      }
+
+      function showResult(url, count) {
+        processedImage.src = `${url}?t=${Date.now()}`;
+        countBadge.textContent = `${count} cultivos detectados`;
+        resultEl.classList.remove("hidden");
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!fileInput.files[0]) {
+          statusEl.textContent = "Selecciona una imagen antes de analizar.";
+          return;
+        }
+
+        const data = new FormData();
+        data.append("file", fileInput.files[0]);
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Procesando...";
+        statusEl.textContent = "Procesando imagen con OpenCV...";
+
+        try {
+          const response = await fetch("/api/upload", {
+            method: "POST",
+            body: data,
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.detail || "No se pudo procesar la imagen");
+          }
+          statusEl.textContent = "Análisis completado.";
+          showResult(payload.processed_url, payload.total_count);
+          await loadScans();
+        } catch (error) {
+          statusEl.textContent = error.message;
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Analizar cultivo";
+        }
+      });
+
+      loadScans();
+    </script>
+  </body>
+</html>
